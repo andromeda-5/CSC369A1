@@ -251,14 +251,20 @@ void (*orig_exit_group)(int);
  */
 void my_exit_group(int status)
 {
-	// ??? do we need to do error checking for this??? //
-	//get the existing process's PID
-	pid_t exiting_pid = current->pid;
-	//remove the exiting process's PID from all lists
-	int success = del_pid(exiting_pid)
-	//calling the original exit_group
-	exit_group(status);
+	//get the exiting process's PID
+	pid_t exiting_process_pid = current->pid;
+	//remove that pid from all lists
+	//del_pid(exiting_process_pid);
+	//bool delete_result = del_pid(exiting_process_pid);
+	// if (delete_result < 0){
+	// 	printk(KERN_DEBUG "this pid is not being monitored");
+	// } else {
+	// 	printk(KERN_DEBUG "removed the exiting pid from all lists?");
+	// }
+	//call the original function
+	orig_exit_group(status);
 }
+	
 //----------------------------------------------------------------
 
 
@@ -280,17 +286,32 @@ void my_exit_group(int status)
  * - Don't forget to call the original system call, so we allow processes to proceed as normal.
  */
 asmlinkage long interceptor(struct pt_regs reg) {
-
-	//check to see if the syscall is being monitored for the current->pid
+	// Check to see if the syscall is being monitored for the current->pid
+	//// get the current process's pid
 	pid_t current_pid = current->pid;
-	//get the syscall from reg
-	int syscall = reg.orig_ax; //hopefully
-	int pid_is_monitored = check_pid_monitored(sycall, current_pid);
-	if (pid_is_monitored) {
-		log_message(current_pid, syscall, pt_regs.ax, , arg3, arg4, arg5, arg6);
+	//// that syscall number corresponds to the number in both the table and the sys_call table
+	//// also assume that table is filled
+	int syscall = reg.ax;
+	mytable intercepted_syscall = table[syscall];
+
+	// do something with the intercepted variable?
+	
+	if (intercepted_syscall.monitored ==  1) {
+		struct list_head *i;
+		struct pid_list *ple;
+
+		list_for_each(i, &table[syscall].my_list) {
+			ple = list_entry(i, struct pid_list, list);
+			if (ple->pid == current_pid) {
+				log_message(current_pid, reg.ax, reg.bx, reg.cx, reg.dx, reg.si, reg.di, reg.bp);				}
+		}
+	} else if (intercepted_syscall.monitored == 2 ) {
+		log_message(current_pid, reg.ax, reg.bx, reg.cx, reg.dx, reg.si, reg.di, reg.bp);
 	}
 
-
+	// call the original syscall
+	return intercepted_syscall.f(reg);
+	// error check the syscall???
 
 	return 0; // Just a placeholder, so it compiles with no warnings!
 }
@@ -345,12 +366,84 @@ asmlinkage long interceptor(struct pt_regs reg) {
  *   you might be holding, before you exit the function (including error cases!).  
  */
 asmlinkage long my_syscall(int cmd, int syscall, int pid) {
+	printk(KERN_DEBUG "just entered the my_syscall function");
+	//error check for syscall
+	if (cmd == REQUEST_SYSCALL_INTERCEPT || cmd == REQUEST_SYSCALL_RELEASE) {
+		// error check the syscall 
+		if (syscall < 0 || syscall > NR_syscalls || syscall == MY_CUSTOM_SYSCALL) {
+			printk(KERN_DEBUG "invalid arguments for intercept");
+			return -EINVAL;
+		} else {
+			//check permissions, must be root
+			if (current_uid() != 0) {
+				printk(KERN_DEBUG "user is not root; cannot intercept syscall ");
+				return -EPERM;
+			}
+		}
+	} else if (cmd == REQUEST_START_MONITORING || cmd == REQUEST_STOP_MONITORING) {
+		//error check if negative or non-existing
+		if (pid < 0 || pid_task(find_vpid(pid), PIDTYPE_PID) == NULL) {
+			return -EINVAL;
+		}
+	} else {
+		printk(KERN_DEBUG "not a valid command"); 
+		return -EINVAL;
+	}
 
-
-
-
-
-
+	// execute commands
+	if (cmd == REQUEST_SYSCALL_INTERCEPT) {
+		//intercept syscall
+		//is the call already being intercepted?
+		mytable *intercept_syscall = &table[syscall];
+		spin_lock(&pidlist_lock);
+		printk(KERN_DEBUG "intercept syscall");
+		if (intercept_syscall->intercepted  == 1 ) {
+			printk(KERN_DEBUG "syscall is already intercepted");
+			spin_unlock(&pidlist_lock);
+			return -EBUSY;
+		} else {
+			// replace the syscall with the general interceptor function
+			//save the original function
+			//optain lock for table
+			intercept_syscall->intercepted = 1;
+			intercept_syscall->f = sys_call_table[syscall];
+			printk(KERN_DEBUG "replacing syscall with the interceptor function");
+			//obtain lock for calltable
+			spin_lock(&calltable_lock);
+			set_addr_rw((unsigned long)sys_call_table);
+			sys_call_table[syscall] = &interceptor;
+			set_addr_ro((unsigned long)sys_call_table);
+			spin_unlock(&calltable_lock);
+			spin_unlock(&pidlist_lock);
+		}
+	} else if (cmd == REQUEST_SYSCALL_RELEASE) {
+		//de-intercept syscall
+		//check if not being intercepted 
+		//lock the table
+		mytable *intercept_syscall = &table[syscall];
+		spin_lock(&pidlist_lock);
+		printk(KERN_DEBUG "de-intercept syscall");		
+		if (intercept_syscall->intercepted == 0 ) {
+			printk(KERN_DEBUG "syscall is not intercepted");
+			spin_unlock(&pidlist_lock);
+			return -EINVAL;
+		} else {
+			// de-intercept
+			printk(KERN_DEBUG "replacing the interceptor back with the original");
+			intercept_syscall->intercepted = 0; 
+			spin_lock(&calltable_lock);
+			set_addr_rw((unsigned long)sys_call_table);
+			sys_call_table[syscall] = intercept_syscall->f;
+			set_addr_ro((unsigned long)sys_call_table);
+			spin_unlock(&calltable_lock);
+			spin_unlock(&pidlist_lock);
+			printk(KERN_DEBUG "done replacing");
+		}
+	} else if (cmd == REQUEST_START_MONITORING) {
+		//start monitoring
+	} else if (cmd == REQUEST_STOP_MONITORING) {
+		 // stop monitoring
+	}
 	return 0;
 }
 
@@ -377,12 +470,38 @@ long (*orig_custom_syscall)(void);
  */
 static int init_function(void) {
 
+	//perform initializations necessary for bookkeeping data structures
+	//save all of the system calls in the table table
+	int i;
+	for (i=0; i < NR_syscalls+1; i++) {
+		mytable *syscall_info = (mytable*)kmalloc(sizeof(mytable), GFP_KERNEL);
+		syscall_info->f = sys_call_table[i];
+		syscall_info->intercepted = 0;
+		syscall_info->monitored = 0;
+		syscall_info->listcount = 0;
+		INIT_LIST_HEAD(&syscall_info->my_list);
+		table[i] = *syscall_info;
+	}
+
+	//set the sys_call_table to writable
+	set_addr_rw((unsigned long)sys_call_table);
+	// //save the original 
+	orig_custom_syscall = sys_call_table[MY_CUSTOM_SYSCALL]; // maybe remove the ampersand
+	// //hijack MY_CUSTOM_SYCALL
+	sys_call_table[MY_CUSTOM_SYSCALL] = &my_syscall;
+	//save the original exit group function
+	orig_exit_group = sys_call_table[__NR_exit_group];
+	//hijack exit group
+	sys_call_table[__NR_exit_group] = my_exit_group;
+	//set the table back to readonly
+	set_addr_ro((unsigned long)sys_call_table);
+
+	// //save the original in the table also
+	//table[MY_CUSTOM_SYSCALL].f = (asmlinkage long) &orig_custom_syscall;
+	//table[__NR_exit_group].f = (asmlinkage long) &orig_exit_group;
 
 
-
-
-
-
+	//ensure synchronization as needed????
 	return 0;
 }
 
@@ -398,11 +517,13 @@ static int init_function(void) {
  */
 static void exit_function(void)
 {        
+	// Restore MY_CUSTOM_SYSCALL to the original syscall
+	//set the thing to writable again
+	set_addr_rw((unsigned long)sys_call_table);
+	sys_call_table[MY_CUSTOM_SYSCALL] = orig_custom_syscall;
+	sys_call_table[__NR_exit_group] = orig_exit_group;
 
-
-
-
-
+	set_addr_ro((unsigned long)sys_call_table);
 
 }
 
