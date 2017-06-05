@@ -471,7 +471,76 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
         }
     } else if (cmd == REQUEST_START_MONITORING) {
         // is the pid being monitored already for syscall
-        printk(KERN_DEBUG "start monitoring command"); 
+        printk(KERN_DEBUG "start monitoring command, most error checking has been done at this point"); 
+        if (pid == 0) {
+            mytable *mt = &table[syscall];
+            printk(KERN_DEBUG "asked to monitor all pids for this syscall");         
+            if (mt->intercepted == 0) {
+                printk(KERN_DEBUG "this syscall isn't being intercepted, cannot monitor");
+                return -EINVAL;
+            } else {
+                if (mt->monitored == 2) {
+                    printk(KERN_DEBUG "all pids are already being monitored for this syscall");
+                    return -EBUSY;
+                } else {
+                    printk(KERN_DEBUG "setting monitored to 2");
+                    mt->monitored = 2;
+                }
+            }
+        } else {
+
+
+            //custom implementation just to see what's wrong
+            //struct list_head *i;
+            //struct pid_list *ple;
+
+            // mytable *mt = &table[syscall];
+            // struct list_head *lh = &(mt->my_list);
+            // struct task_struct *ts = pid_task(find_vpid(pid), PIDTYPE_PID);
+            // int blah;
+            // if (!lh) {
+            //     printk(KERN_DEBUG "blahblah this is empty");
+            // }
+            // //check if pid exists again?
+            
+            printk(KERN_DEBUG "asked to monitor a specific pid");
+            // //check if pid is already being monitored 
+            printk(KERN_DEBUG "this is the system call %x and the pid %x", syscall, pid);
+            
+            // if (!ts) {
+            //     printk(KERN_DEBUG "this is not an existing pid");
+            //     return -EINVAL;
+            // } else {
+            //     //blah = check_pid_monitored(syscall, pid);
+            //     printk(KERN_DEBUG "this is the error message %x", blah);
+            //     printk(KERN_DEBUG "this pid exists");
+            // }
+            
+
+            // printk(KERN_DEBUG "this is the error message %x", blah);
+            // if (check_pid_monitored(syscall, pid) == 1) {
+            //     printk(KERN_DEBUG "the pid is already being monitored"); 
+            //   //  return -EBUSY;
+            // } 
+            //else {
+        //         mytable *mt = &table[syscall];
+        //         printk(KERN_DEBUG "start monitoring, but check if intercepted first");       
+        //         if (mt->intercepted == 0) {
+        //             printk(KERN_DEBUG "syscall hasn't been intercepted yet so cannot monitor");
+        //        //     return -EINVAL;
+        //         } else {
+        //          //   int error = add_pid_sysc(pid, syscall);
+        //             printk(KERN_DEBUG "the syscall is intercepted so start monitoring");
+        //             // if (error == -ENOMEM) {
+        //             //     printk(KERN_DEBUG "not enough memory");
+        //             //     return -ENOMEM;
+        //             // }
+        //             //overwrie the value regardless of what's in it at this point
+        //          //   mt->monitored = 1;
+        //         }
+        //     }
+
+        }
         // if (pid != 0) {
         //     printk(KERN_DEBUG "pid is not 0");
         //     //check if it's being monitored
@@ -583,7 +652,7 @@ static int init_function(void) {
         syscall_info->intercepted = 0;
         syscall_info->monitored = 0;
         syscall_info->listcount = 0;
-        INIT_LIST_HEAD(&syscall_info->my_list);
+        INIT_LIST_HEAD(&(syscall_info->my_list));
         table[i] = *syscall_info;
     }
     //spin_unlock(&pidlist_lock);
