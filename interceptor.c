@@ -204,8 +204,11 @@ static int check_pid_from_list(pid_t pid1, pid_t pid2) {
 
     struct task_struct *p1 = pid_task(find_vpid(pid1), PIDTYPE_PID);
     struct task_struct *p2 = pid_task(find_vpid(pid2), PIDTYPE_PID);
-    if(p1->real_cred->uid != p2->real_cred->uid)
+    if(p1->real_cred->uid != p2->real_cred->uid) {
+        printk(KERN_DEBUG "these don't have the right thingies");
+        printk(KERN_DEBUG "current_pid's uid is %d and the other one is %d", p1->real_cred->uid, p2->real_cred->uid);
         return -EPERM;
+    }
     return 0;
 }
 
@@ -254,7 +257,7 @@ void my_exit_group(int status)
     //get the exiting process's PID
     //pid_t exiting_process_pid = current->pid;
     //remove that pid from all lists
-    //del_pid(exiting_process_pid);
+    del_pid(current->pid);
     //bool delete_result = del_pid(exiting_process_pid);
     // if (delete_result < 0){
     //  printk(KERN_DEBUG "this pid is not being monitored");
@@ -292,11 +295,11 @@ asmlinkage long interceptor(struct pt_regs reg) {
     //// that syscall number corresponds to the number in both the table and the sys_call table
     //// also assume that table is filled
     int syscall = reg.ax;
-    mytable intercepted_syscall = table[syscall];
+    mytable *mt = &table[syscall];
 
     // do something with the intercepted variable?
     
-    if (intercepted_syscall.monitored ==  1) {
+    if (mt->monitored ==  1) {
         struct list_head *i;
         struct pid_list *ple;
 
@@ -305,12 +308,18 @@ asmlinkage long interceptor(struct pt_regs reg) {
             if (ple->pid == current_pid) {
                 log_message(current_pid, reg.ax, reg.bx, reg.cx, reg.dx, reg.si, reg.di, reg.bp);               }
         }
-    } else if (intercepted_syscall.monitored == 2) {
-        log_message(current_pid, reg.ax, reg.bx, reg.cx, reg.dx, reg.si, reg.di, reg.bp);
+    } else if (mt->monitored == 2) {
+        if (mt->listcount == 0) {
+            log_message(current_pid, reg.ax, reg.bx, reg.cx, reg.dx, reg.si, reg.di, reg.bp);
+        } else {
+            if (check_pid_monitored(syscall, current_pid) == 0) {
+                log_message(current_pid, reg.ax, reg.bx, reg.cx, reg.dx, reg.si, reg.di, reg.bp);
+            }
+        }
     }
 
     // call the original syscall
-    return intercepted_syscall.f(reg);
+    return mt->f(reg);
     // error check the syscall???
 
     return 0; // Just a placeholder, so it compiles with no warnings!
@@ -419,72 +428,85 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
             }
         }   
     } else if (cmd == REQUEST_START_MONITORING) {
+        printk(KERN_DEBUG "request to start monitoring");
         if (pid < 0) {
+            printk(KERN_DEBUG "pid cannot be negative");
             return -EINVAL;
         } else if (pid == 0) {
+            printk(KERN_DEBUG "request to start monitoring all pids");
             if (current_uid() != 0) {
+                printk(KERN_DEBUG "user isn't root to start monitoring all pids");
                 return -EPERM;
             } else {
                 //check if intercepted
                 mytable *mt = &table[syscall];
                 if (mt->intercepted == 0) {
+                    printk(KERN_DEBUG "call isn't intercepted");
                     return -EINVAL;
                 }
 
                 //check the monitored variable and start monitoring if possible
                 if (mt->monitored == 0) {
+                    printk(KERN_DEBUG "nothing is being monitored, so set to 2");
                     spin_lock(&pidlist_lock);
                     mt->monitored = 2;
                     spin_unlock(&pidlist_lock);
                     return 0;
                 } else if (mt->monitored == 1) {
+                    printk(KERN_DEBUG "some are being monitored, set to 2");
                     spin_lock(&pidlist_lock);
                     mt->monitored = 2;
                     if (mt->listcount > 0) {
+                        printk(KERN_DEBUG "destorying the list0");
                         destroy_list(syscall);
                     }
                     spin_unlock(&pidlist_lock);
                     return 0;
                 } else {
                     //already monitoring all pids for this syscall
+                    printk("all pids are already being monitored");
                     return -EBUSY;
                 }
             }
         } else {
             //check if pid exists
+            printk(KERN_DEBUG "a single pid is asked to be monitored");
             if (pid_task(find_vpid(pid), PIDTYPE_PID) == NULL) {
+                printk(KERN_DEBUG "pid is not exsiting");
                 return -EINVAL;
             } 
 
             //check permissions
             if (current_uid() != 0) {
-                if (check_pid_from_list(pid, current->pid) != 0) {
+                if (check_pid_from_list(current->pid, pid) != 0) {
+                    printk(KERN_DEBUG "user isn't root and don't have permissions to monitor pid %d, current_pid is %d", pid, current->pid);
                     return -EPERM;
                 } 
             } else {
 
                 mytable *mt = &table[syscall];
                 if (mt->intercepted == 0) {
+                    printk(KERN_DEBUG "not intercepted");
                     return -EINVAL;
                 } else {
-                    int error;
+                    int error = 0;
                     spin_lock(&pidlist_lock);
                     if (mt->monitored == 0) {
                         mt->monitored = 1;
                         error = add_pid_sysc(pid, syscall);
+                        printk("nothing is monitored, adding pid");
                     } if (mt->monitored == 1) {
                         //check if it's already being monitored
-                        if (mt->listcount > 0) {
-                            if (check_pid_monitored(syscall, pid) == 1) {
-                                error = -EBUSY;
-                            } else {
-                                error = add_pid_sysc(pid, syscall);
-                            }
+                        int error;
+                        printk(KERN_DEBUG "some pids are being monitored");
+                        if (check_pid_monitored(syscall, pid) == 1) {
+                            error = -EBUSY;
                         } else {
                             error = add_pid_sysc(pid, syscall);
                         }
                     } else {
                         //already monitored
+                        printk(KERN_DEBUG "all pids are being monitored already");
                         error = -EBUSY;
                     }
                     spin_unlock(&pidlist_lock);
@@ -493,25 +515,32 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
             }
         }
     } else if (cmd == REQUEST_STOP_MONITORING) {
+        printk(KERN_DEBUG "request to stop monitoring");
         if (pid < 0) {
+            printk(KERN_DEBUG "pid cannot be negative");
             return -EINVAL;
         } else if (pid == 0) {
+            printk(KERN_DEBUG "request to stop monitoring all pids");
             if (current_uid() != 0) {
+                printk(KERN_DEBUG "user doesn't have the right permissions");
                 return -EPERM;
             } else {
                 //check if intercepted
                 mytable *mt = &table[syscall];
                 if (mt->intercepted == 0) {
+                    printk("system call wasn't intercepted");
                     return -EINVAL;
                 }
                 
                 //check the monitored variable and stop monitoring
                 if (mt->monitored == 0) {
+                    printk("system call isn't being monitored");
                     return -EINVAL;
                 } else if (mt->monitored == 1) {
                     spin_lock(&pidlist_lock);
                     mt->monitored = 0;
                     if (mt->listcount > 0) {
+                        printk("deleting pids that were being monitored");
                         destroy_list(syscall);
                     }
                     spin_unlock(&pidlist_lock);
@@ -519,42 +548,74 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
                 } else {
                     //this should be changed, or the one above
                     spin_lock(&pidlist_lock);
-                    // mt->monitored = 0;
-                    // if (mt->listcount > 0) {
-                    //     destroy_list(syscall);
-                    // }
+                    printk(KERN_DEBUG "this is what the mt->monitored variable is: %x", mt->monitored);
+                    mt->monitored = 0;
+                    if (mt->listcount > 0) {
+                        printk(KERN_DEBUG "destroying pids that are being monitored");
+                        destroy_list(syscall);
+                    }
                     spin_unlock(&pidlist_lock);
                     return 0;
                 }
             }
-        } 
-        else {
-            mytable *mt = &table[syscall];
-            if (mt->intercepted == 0) {
-                return -EINVAL;
-            }
-            
-            if (mt->monitored == 0) {
+        } else {
+            if (pid_task(find_vpid(pid), PIDTYPE_PID) == NULL) {
+                printk(KERN_DEBUG "pid is not exsiting");
                 return -EINVAL;
             } 
-            if (mt->monitored == 1) {
-                //check if it's already being monitored
-                int error = 0;
-                spin_lock(&pidlist_lock);
-                mt->monitored = 0;
-                if (mt->listcount > 0) {
-                    if (check_pid_monitored(syscall, pid) == 1) {   
-                        error = del_pid_sysc(pid, syscall);         
-                    }
+
+            //check permissions
+            if (current_uid() != 0) {
+                if (check_pid_from_list(current->pid, pid) != 0) {
+                    printk(KERN_DEBUG "user isn't root and don't have permissions");
+                    return -EPERM;
                 } 
-                spin_unlock(&pidlist_lock);
-                return error;
             } else {
-                //monitored is 2
-                spin_lock(&pidlist_lock);
-                mt->monitored = 0;
-                spin_unlock(&pidlist_lock);
-                return 0;
+
+                mytable *mt = &table[syscall];
+                printk("this is an individual pid for syscall %x pid %x", syscall, pid);
+                if (mt->intercepted == 0) {
+                    return -EINVAL;
+                }
+                
+                if (mt->monitored == 0) {
+                    return -EINVAL;
+                } 
+                if (mt->monitored == 1) {
+                    //check if it's already being monitored
+                    int error = 0;
+                    spin_lock(&pidlist_lock);
+                    mt->monitored = 0;
+                    if (mt->listcount > 0) {
+                        if (check_pid_monitored(syscall, pid) == 1) {   
+                            error = del_pid_sysc(pid, syscall);         
+                        }
+                    } 
+                    spin_unlock(&pidlist_lock);
+                    return error;
+                } 
+                else {
+                    //monitored is 2, we are asked to stop monitoring a specific pid
+                    int error = 0;
+                    if (mt->listcount > 0) {
+                        if (check_pid_monitored(syscall, pid) == 1){
+                            printk(KERN_DEBUG "this pid is already not being monitored");
+                            error = -EBUSY;
+                        } else {
+                            //add to blacklist
+                            spin_lock(&pidlist_lock);
+                            error = add_pid_sysc(pid, syscall);
+                            spin_unlock(&pidlist_lock);
+                        }
+                    } else {
+                        //add to blacklist
+                        spin_lock(&pidlist_lock);
+                        error = add_pid_sysc(pid, syscall);
+                        spin_unlock(&pidlist_lock);
+                    }
+                    
+                    return error;
+                }
             }
         }
         return 0;
@@ -589,16 +650,13 @@ static int init_function(void) {
 
     //perform initializations necessary for bookkeeping data structures
     //save all of the system calls in the table table
-    int i;
+    int i=0;
     spin_lock(&pidlist_lock);
-    for (i=0; i < NR_syscalls+1; i++) {
-        mytable *syscall_info = (mytable*)kmalloc(sizeof(mytable), GFP_KERNEL);
-        syscall_info->f = sys_call_table[i];
-        syscall_info->intercepted = 0;
-        syscall_info->monitored = 0;
-        syscall_info->listcount = 0;
-        INIT_LIST_HEAD(&(syscall_info->my_list));
-        table[i] = *syscall_info;
+    for (i=0; i < NR_syscalls + 1; i++) {
+        table[i].intercepted = 0;
+        table[i].monitored = 0;
+        table[i].listcount = 0;
+        INIT_LIST_HEAD(&(table[i].my_list));
     }
     spin_unlock(&pidlist_lock);
     //set the sys_call_table to writable
@@ -615,12 +673,6 @@ static int init_function(void) {
     //set the table back to readonly
     set_addr_ro((unsigned long)sys_call_table);
     spin_unlock(&calltable_lock);
-    // //save the original in the table also
-    //table[MY_CUSTOM_SYSCALL].f = (asmlinkage long) &orig_custom_syscall;
-    //table[__NR_exit_group].f = (asmlinkage long) &orig_exit_group;
-
-
-    //ensure synchronization as needed????
     return 0;
 }
 
@@ -638,6 +690,10 @@ static void exit_function(void)
 {        
     // Restore MY_CUSTOM_SYSCALL to the original syscall
     //set the thing to writable again
+    int i;
+    for (i=0; i < NR_syscalls + 1; i++) {
+        destroy_list(i);
+    }
     spin_lock(&calltable_lock);
     set_addr_rw((unsigned long)sys_call_table);
     sys_call_table[MY_CUSTOM_SYSCALL] = orig_custom_syscall;
