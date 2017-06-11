@@ -417,6 +417,10 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
             } else {
                 spin_lock(&pidlist_lock);
                 mt->intercepted = 0;
+                mt->monitored = 0;
+                if (mt->listcount > 0) {
+                    destroy_list(syscall);
+                }
                 spin_unlock(&pidlist_lock);
 
                 spin_lock(&calltable_lock);
@@ -428,7 +432,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
             }
         }   
     } else if (cmd == REQUEST_START_MONITORING) {
-        printk(KERN_DEBUG "request to start monitoring");
+        printk(KERN_DEBUG "request to start monitoring syscall: %d, pid %d", syscall, pid);
         if (pid < 0) {
             printk(KERN_DEBUG "pid cannot be negative");
             return -EINVAL;
@@ -465,54 +469,66 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
                 } else {
                     //already monitoring all pids for this syscall
                     printk("all pids are already being monitored");
+                    if (mt->listcount > 0) {
+                        destroy_list(syscall);
+                    }
                     return -EBUSY;
                 }
             }
         } else {
             //check if pid exists
+            mytable *mt = &table[syscall];
             printk(KERN_DEBUG "a single pid is asked to be monitored");
             if (pid_task(find_vpid(pid), PIDTYPE_PID) == NULL) {
-                printk(KERN_DEBUG "pid is not exsiting");
+                printk(KERN_DEBUG "pid is not existing");
                 return -EINVAL;
             } 
 
             //check permissions
+            
             if (current_uid() != 0) {
+                printk(KERN_DEBUG "not root, user is %d: ", current_uid());
                 if (check_pid_from_list(current->pid, pid) != 0) {
                     printk(KERN_DEBUG "user isn't root and don't have permissions to monitor pid %d, current_pid is %d", pid, current->pid);
                     return -EPERM;
                 } 
-            } else {
+            } 
 
-                mytable *mt = &table[syscall];
-                if (mt->intercepted == 0) {
-                    printk(KERN_DEBUG "not intercepted");
-                    return -EINVAL;
-                } else {
-                    int error = 0;
-                    spin_lock(&pidlist_lock);
-                    if (mt->monitored == 0) {
-                        mt->monitored = 1;
-                        error = add_pid_sysc(pid, syscall);
-                        printk("nothing is monitored, adding pid");
-                    } if (mt->monitored == 1) {
-                        //check if it's already being monitored
-                        int error;
-                        printk(KERN_DEBUG "some pids are being monitored");
-                        if (check_pid_monitored(syscall, pid) == 1) {
-                            error = -EBUSY;
-                        } else {
-                            error = add_pid_sysc(pid, syscall);
-                        }
-                    } else {
-                        //already monitored
-                        printk(KERN_DEBUG "all pids are being monitored already");
+                
+            if (mt->intercepted == 0) {
+                printk(KERN_DEBUG "not intercepted");
+                return -EINVAL;
+            } else {
+                int error = 0;
+                spin_lock(&pidlist_lock);
+                if (mt->monitored == 0) {
+                    mt->monitored = 1;
+                    error = add_pid_sysc(pid, syscall);
+                    printk("nothing is monitored, adding pid");
+                } else if (mt->monitored == 1) {
+                    //check if it's already being monitored
+                    printk(KERN_DEBUG "some pids are being monitored");
+                    if (check_pid_monitored(syscall, pid) == 1) {
+                        printk(KERN_DEBUG "this pid is already being monitored");
                         error = -EBUSY;
+                    } else {
+                        error = add_pid_sysc(pid, syscall);
                     }
-                    spin_unlock(&pidlist_lock);
-                    return error;
+                } else {
+                    //already monitored
+                    printk(KERN_DEBUG "all pids are being monitored already");
+                    if (mt->listcount > 0) {
+                       if (check_pid_monitored(syscall, pid) == 1) {
+                            del_pid_sysc(pid, syscall);
+                       } else {
+                            error = -EBUSY;
+                       }
+                    }
                 }
+                spin_unlock(&pidlist_lock);
+                return error;
             }
+            
         }
     } else if (cmd == REQUEST_STOP_MONITORING) {
         printk(KERN_DEBUG "request to stop monitoring");
@@ -559,64 +575,66 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
                 }
             }
         } else {
+            mytable *mt = &table[syscall];
             if (pid_task(find_vpid(pid), PIDTYPE_PID) == NULL) {
                 printk(KERN_DEBUG "pid is not exsiting");
                 return -EINVAL;
             } 
 
             //check permissions
+            
             if (current_uid() != 0) {
                 if (check_pid_from_list(current->pid, pid) != 0) {
                     printk(KERN_DEBUG "user isn't root and don't have permissions");
                     return -EPERM;
                 } 
-            } else {
+            } 
 
-                mytable *mt = &table[syscall];
-                printk("this is an individual pid for syscall %x pid %x", syscall, pid);
-                if (mt->intercepted == 0) {
-                    return -EINVAL;
-                }
                 
-                if (mt->monitored == 0) {
-                    return -EINVAL;
+            printk("this is an individual pid for syscall %x pid %x", syscall, pid);
+            if (mt->intercepted == 0) {
+                return -EINVAL;
+            }
+            
+            if (mt->monitored == 0) {
+                return -EINVAL;
+            } 
+            if (mt->monitored == 1) {
+                //check if it's already being monitored
+                int error = 0;
+                spin_lock(&pidlist_lock);
+                mt->monitored = 0;
+                if (mt->listcount > 0) {
+                    if (check_pid_monitored(syscall, pid) == 1) {   
+                        error = del_pid_sysc(pid, syscall);         
+                    }
                 } 
-                if (mt->monitored == 1) {
-                    //check if it's already being monitored
-                    int error = 0;
-                    spin_lock(&pidlist_lock);
-                    mt->monitored = 0;
-                    if (mt->listcount > 0) {
-                        if (check_pid_monitored(syscall, pid) == 1) {   
-                            error = del_pid_sysc(pid, syscall);         
-                        }
-                    } 
-                    spin_unlock(&pidlist_lock);
-                    return error;
-                } 
-                else {
-                    //monitored is 2, we are asked to stop monitoring a specific pid
-                    int error = 0;
-                    if (mt->listcount > 0) {
-                        if (check_pid_monitored(syscall, pid) == 1){
-                            printk(KERN_DEBUG "this pid is already not being monitored");
-                            error = -EBUSY;
-                        } else {
-                            //add to blacklist
-                            spin_lock(&pidlist_lock);
-                            error = add_pid_sysc(pid, syscall);
-                            spin_unlock(&pidlist_lock);
-                        }
+                spin_unlock(&pidlist_lock);
+                return error;
+            } 
+            else {
+                //monitored is 2, we are asked to stop monitoring a specific pid
+                int error = 0;
+                if (mt->listcount > 0) {
+                    if (check_pid_monitored(syscall, pid) == 1){
+                        printk(KERN_DEBUG "this pid is already not being monitored");
+                        error = -EBUSY;
                     } else {
                         //add to blacklist
                         spin_lock(&pidlist_lock);
                         error = add_pid_sysc(pid, syscall);
                         spin_unlock(&pidlist_lock);
                     }
-                    
-                    return error;
+                } else {
+                    //add to blacklist
+                    spin_lock(&pidlist_lock);
+                    error = add_pid_sysc(pid, syscall);
+                    spin_unlock(&pidlist_lock);
                 }
+                
+                return error;
             }
+            
         }
         return 0;
     } 
