@@ -1,0 +1,71 @@
+make -C /lib/modules/`uname -r`/build M=`pwd`
+make[1]: Entering directory `/usr/src/linux-headers-4.4.0-75-generic'
+  CC [M]  /h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.o
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:77:15: error: ‘NR_syscalls’ undeclared here (not in a function)
+ mytable table[NR_syscalls+1];
+               ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:80:27: error: ‘SPIN_LOCK_UNLOCKED’ undeclared here (not in a function)
+ spinlock_t pidlist_lock = SPIN_LOCK_UNLOCKED;
+                           ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c: In function ‘add_pid_sysc’:
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:98:34: error: implicit declaration of function ‘kmalloc’ [-Werror=implicit-function-declaration]
+     struct pid_list *ple=(struct pid_list*)kmalloc(sizeof(struct pid_list), GFP_KERNEL);
+                                  ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:98:26: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+     struct pid_list *ple=(struct pid_list*)kmalloc(sizeof(struct pid_list), GFP_KERNEL);
+                          ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c: In function ‘del_pid_sysc’:
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:127:13: error: implicit declaration of function ‘kfree’ [-Werror=implicit-function-declaration]
+             kfree(ple);
+             ^
+In file included from include/linux/module.h:9:0,
+                 from /h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:3:
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c: In function ‘del_pid’:
+include/linux/list.h:426:25: warning: left-hand operand of comma expression has no effect [-Wunused-value]
+  for (pos = (head)->next, n = pos->next; pos != (head); \
+                         ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:155:9: note: in expansion of macro ‘list_for_each_safe’
+         list_for_each_safe(i, n, &(table[s].my_list)) {
+         ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c: In function ‘destroy_list’:
+include/linux/list.h:426:25: warning: left-hand operand of comma expression has no effect [-Wunused-value]
+  for (pos = (head)->next, n = pos->next; pos != (head); \
+                         ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:186:5: note: in expansion of macro ‘list_for_each_safe’
+     list_for_each_safe(i, n, &(table[sysc].my_list)) {
+     ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c: In function ‘check_pid_from_list’:
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:207:27: error: invalid operands to binary != (have ‘kuid_t’ and ‘kuid_t’)
+     if(p1->real_cred->uid != p2->real_cred->uid) {
+                           ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:209:9: warning: format ‘%d’ expects argument of type ‘int’, but argument 2 has type ‘kuid_t’ [-Wformat=]
+         printk(KERN_DEBUG "current_pid's uid is %d and the other one is %d", p1->real_cred->uid, p2->real_cred->uid);
+         ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:209:9: warning: format ‘%d’ expects argument of type ‘int’, but argument 3 has type ‘kuid_t’ [-Wformat=]
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c: In function ‘my_syscall’:
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:386:27: error: invalid operands to binary != (have ‘kuid_t’ and ‘int’)
+         if (current_uid() != 0) {
+                           ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:409:27: error: invalid operands to binary != (have ‘kuid_t’ and ‘int’)
+         if (current_uid() != 0) {
+                           ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:441:31: error: invalid operands to binary != (have ‘kuid_t’ and ‘int’)
+             if (current_uid() != 0) {
+                               ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:489:31: error: invalid operands to binary != (have ‘kuid_t’ and ‘int’)
+             if (current_uid() != 0) {
+                               ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:490:17: warning: format ‘%d’ expects argument of type ‘int’, but argument 2 has type ‘kuid_t’ [-Wformat=]
+                 printk(KERN_DEBUG "not root, user is %d: ", current_uid());
+                 ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:540:31: error: invalid operands to binary != (have ‘kuid_t’ and ‘int’)
+             if (current_uid() != 0) {
+                               ^
+/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.c:586:31: error: invalid operands to binary != (have ‘kuid_t’ and ‘int’)
+             if (current_uid() != 0) {
+                               ^
+cc1: some warnings being treated as errors
+make[2]: *** [/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code/interceptor.o] Error 1
+make[1]: *** [_module_/h/u11/g5/00/dongyife/csc369/A1/starter_code/starter_code] Error 2
+make[1]: Leaving directory `/usr/src/linux-headers-4.4.0-75-generic'
+make: *** [kbuild] Error 2
